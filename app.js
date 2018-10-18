@@ -6,51 +6,46 @@
 var template = {}
 
 template.peopleList = async function(obj={}) {
-	let htmlList = ``
-	if(!Array.isArray(obj.itemListElement)) { obj.itemListElement = [ obj.itemListElement ] }
-	for (let i of obj.itemListElement) {
-		let item
+	let people = Array.isArray(obj.itemListElement) ? obj.itemListElement : [ obj.itemListElement ]
+	let peoplePromise = []
+	for (let i of people) {
 		switch(typeof i) {
 			case "string" : //Then it is probably just a URL, resolve like normal		
-			item = await fetch(i).then(response=>response.json()).catch()
+			peoplePromise.push(fetch(i).then(response=>response.json()).catch(err=>console.log(err.message)).then(peopleWash))
 			break
-			case "object" : //Then we need the id to resolve so we can trust the object
-			item = await fetch(i["@id"] || i.id).then(response=>response.json()).catch()
+			case "object" : // Then we need the id to resolve so we can trust the object
+			if((i["@type"]||i.type) && (i["@type"]||i.type).indexOf("Person")===-1) {
+				continue // Some other type; do not fetch
+			}
+			peoplePromise.push(fetch(i["@id"] || i.id).then(response=>response.json()).catch(err=>console.log(err.message)).then(peopleWash))
 			break
 			default :
-			// We were given something very weird. Just move forward.
-			// This will cause a fail on this person
-			item = {}
+			// We were given something very weird. Just discard.
 		}
-		//We only care about people in the aggregation
-		if(objToUse["@type"] &&  objToUse["@type"]== "Person"){
-			try {
-				htmlList += `<li class="listPerson" person-id="${objToUse['@id']}" onclick="personClicked('${objToUse.name}')" >${objToUse.name}</li>`
-			} 
-			catch (err) {
-				htmlList += `<li class="listPerson">There was an error with person in list at index `+i+`</li>`
-			}
-		}
-		else{
-			//This object is not a person, we won't know what to do with it.  
-			htmlList += `<li class="listPerson">There was an error with item in aggregation at index `+i+`</li>`
-		}	
 	}
-	return htmlList;
+	peoplePromise = peoplePromise.filter(p=>p===null) //We only care about people in the aggregation
+	let persons = await Promise.all(peoplePromise).catch(err=>console.log(err.message))
+	return persons.map(person=>`<li class="listPerson" person-id="${person['@id']}" onclick="personClicked('${person['@id']}')" >${person.name || "[ anonymous ]"}</li>`).join()
 }
 
-async function renderElement(elem, tmp) {
+function peopleWash(obj) {
+	if((obj["@type"]||obj.type).indexOf("Person")===-1) {
+		return null
+	}
+	return obj
+}
+
+async function renderElement(elem, tmp=null) {
     while (elem.firstChild) {
+		// probably not strictly necessary.
         elem.removeChild(elem.firstChild)
     }
-    if (tmp) {
-        elem.innerHTML = await tmp
-    }
+	elem.innerHTML = await tmp
 }
 
 async function doExample(listURL) {
-    let resolvedObj = await get(listURL)
-    renderElement(document.getElementById("personList"), template.peopleList(resolvedObj))
+    let resolvedObj = await fetch(listURL).then(response=>response.json()).catch(err=>console.log(err.message))
+    renderElement(personList, template.peopleList(resolvedObj))
 }
 
 //simulate the page being handle an initial object.  It is most likely one would have to /query and filter for an object ahead of time.  
